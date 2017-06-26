@@ -3,9 +3,6 @@
 ## To be run on MUFASA-PC with two cameras connected via FireWire
 ## Modified by Henry Ehrhard
 
-# review note: not all functions defined used
-#              Detect signal light: cv2.findContours(..), identify(..)
-
 import numpy as np
 from numpy import dot
 from numpy import average as avg
@@ -25,7 +22,7 @@ VCELLS = 3 #number of vertical cells on a tag
 
 HEIGHT = 480
 WIDTH = 640
-HORIZ_OFFSET = 7 # 9
+HORIZ_OFFSET = 7 # 9  #THESE OFFSETS BE OBSOLETE CODE
 VERT_OFFSET = 77 # 73
 RED,GREEN,BLUE,YELLOW,DARKRED = ([0,0,255],[0,255,0],[255,0,0],[0,255,255],[0,0,170])
 PRINTING = True
@@ -33,14 +30,13 @@ DISPLAY_TAGS = True
 Robots = {}
 CALIBRATION_MODE = False
 RECORD = True
-TANK = False # the tank robot can only move in one-dimention without turn
+TANK = False
 
-# initialize file storage path
 if TANK:
     path = "TankRuns\\"
     TIME_LIMIT = 480
 else:
-    path = "KiwiRuns\\RowsTestbed\\"  # kiwi is the kind of robot which can move to all directions
+    path = "KiwiRuns\\RowsTestbed\\"
     TIME_LIMIT = 180
 
 
@@ -87,9 +83,9 @@ def threshold(src, value=120):
     ret, thresh = cv2.threshold(src, value, 255, cv2.THRESH_BINARY)
     return thresh
 
-#finds all contours and keeps only those with area between 50 and 1000 pixels
+#finds all contours anqd keeps only those with area between 50 and 1000 pixels
 def findAprilTags(threshed, img):
-    contours, hierarchy = cv2.findContours(threshed, 1, cv2.CHAIN_APPROX_SIMPLE) # contours are stored as vectors of points
+    contours, hierarchy = cv2.findContours(threshed, 1, cv2.CHAIN_APPROX_SIMPLE)
     return filter(lambda c: isTag(c, img), contours)
 
 def isTag(c, img):
@@ -286,9 +282,8 @@ def integerize(point):
 
 def main():
 
-    # turn on the camera
-    cam0 = cv2.VideoCapture(1) # VideoCapture is a class defined in opencv.
-    cam1 = cv2.VideoCapture(0) # 0 as input means open the default camera.
+    cam0 = cv2.VideoCapture(1)
+    cam1 = cv2.VideoCapture(0)
     
     #find transformations to line up frames
     
@@ -299,28 +294,25 @@ def main():
     #calibrate for a continuous shot at the height of the tags
     calibrationPoints0 = np.float32([[58,57],[61,438],[580,54],[582,432]])
     calibrationPoints1 = np.float32([[54,40],[55,426],[578,43],[574,418]])
-    corners = np.float32([[0,0],[0,HEIGHT],[WIDTH,0],[WIDTH,HEIGHT]]) 
     
     #error test calibration
     #calibrationPoints0 = np.float32([[105,19],[109,411],[622,15],[626,402]])
     #calibrationPoints1 =  np.float32([[105,14],[109,407],[623,15],[626,400]])
     
-   
-    transform0 = cv2.getPerspectiveTransform(calibrationPoints0,corners) # transform coordinate from the original to a rectangle with 0,0 to the top-left corner.
-    transform1 = cv2.getPerspectiveTransform(calibrationPoints1,corners) # first param is the source coordinates, second is the destination coordinates
+    corners = np.float32([[0,0],[0,HEIGHT],[WIDTH,0],[WIDTH,HEIGHT]])    
+    transform0 = cv2.getPerspectiveTransform(calibrationPoints0,corners)
+    transform1 = cv2.getPerspectiveTransform(calibrationPoints1,corners)
     
-    # prepare to write in .csv and .avi files
     if RECORD:
-        if len(sys.argv) > 1: # sys.argv stores the input user puts in the command line, default size of 1.
-            f = open(sys.argv[1], 'wb') # w: writing mode; b: open as binary file
+        if len(sys.argv) > 1:
+            f = open(sys.argv[1], 'wb')
         else:
             i = 1
-            while os.path.isfile(path + "tracking" + str(i) + ".csv"): # isfile check if a regular file exist with the given path
+            while os.path.isfile(path + "tracking" + str(i) + ".csv"):
                 i = i + 1
             f = open(path+"tracking"+str(i)+".csv", 'wb')
         writer = csv.writer(f)
-        out = cv2.VideoWriter(path+"trial" + str(i) + '.avi', -1, 27.0, (WIDTH, 2*HEIGHT)) # open video file for writing.
-        # param1: file name; param2: codec of the file, such as mpeg ; param3: fps; param4: size
+        out = cv2.VideoWriter(path+"trial" + str(i) + '.avi', -1, 27.0, (WIDTH, 2*HEIGHT))
 
     cv2.namedWindow('combFrame', cv2.WINDOW_NORMAL)
     lastX = None
@@ -331,12 +323,12 @@ def main():
         
         
         # Capture frame-by-frame
-        ret0, frame0 = cam0.read() # read the first frame. first return value is a bool, says if successfully capture a frame or not. second return is the frame.
+        ret0, frame0 = cam0.read()
         ret1, frame1 = cam1.read()
         
         if ret0 & ret1:
             
-            if sum(abs(cv2.subtract(np.int32(frame0)[HEIGHT-1,:,0], np.int32(frame1)[0,:,0]))) > 50000: # image stored as a matrix?? Check for shift of focus during the recording
+            if sum(abs(cv2.subtract(np.int32(frame0)[HEIGHT-1,:,0], np.int32(frame1)[0,:,0]))) > 50000:
                 cam0.release()
                 cam1.release()
                 cam0 = cv2.VideoCapture(1)
@@ -344,19 +336,16 @@ def main():
                 ret0, frame0 = cam0.read()
                 ret1, frame1 = cam1.read()
                 print "cameras reset"
-            
-            # covert color to gray
-            thresh0 = threshold(cv2.cvtColor(frame0, cv2.COLOR_BGR2GRAY,260)) # 260 - number of channels
+        
+            thresh0 = threshold(cv2.cvtColor(frame0, cv2.COLOR_BGR2GRAY,260))
             thresh1 = threshold(cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY,260))
  
             tagList = findAprilTags(thresh0, frame0)
             drawTags(tagList,frame0)
-            
-            # record the position of the robot
             for tag in tagList:
                 M = cv2.moments(tag)
-                center = cv2.perspectiveTransform(np.float32([[(M['m10']/M['m00']), (M['m01']/M['m00'])]])[None,:,:],transform0) # transform the tag shape to the one conform to the rectangular window??
-                lastX = center[0][0][0] # x coordinate of the robot
+                center = cv2.perspectiveTransform(np.float32([[(M['m10']/M['m00']), (M['m01']/M['m00'])]])[None,:,:],transform0)
+                lastX = center[0][0][0]
                 lastY = center[0][0][1]
                 
             
@@ -374,22 +363,19 @@ def main():
                 for point in calibrationPoints1.astype(int):
                     cv2.circle(frame1, tuple(point.tolist()), 2, (255,0,0),-1)        
             else:
-                frame0 = cv2.warpPerspective(frame0, transform0, (WIDTH,HEIGHT)) # transform the frame
+                frame0 = cv2.warpPerspective(frame0, transform0, (WIDTH,HEIGHT))
                 frame1 = cv2.warpPerspective(frame1, transform1, (WIDTH,HEIGHT))
             
             combFrame = np.concatenate((frame0,frame1),axis=0)
                 
             #drawTags(tagList,combFrame)q
             #drawRobots(combFrame)
-            cv2.imshow('combFrame', combFrame) # display the frame
-            
-            # write frame(video) to file and write position of the tag to .csv
+            cv2.imshow('combFrame', combFrame)
             if RECORD:
                 out.write(combFrame)
-                if lastX != None: # is it possible that this value == None during the recording?
+                if lastX != None:
                     writer.writerow([lastX, lastY])
-        
-        # Automatically stop the process when the length of time exceeds the time limit
+            
         now = time.time()
         if now - startTime > TIME_LIMIT:
             break
@@ -399,7 +385,6 @@ def main():
     # When everything is done, release the capture
 
    #cv2.imwrite("background.jpg", combFrame)
-    # turn off the cameras
     cam0.release()
     cam1.release()
     if RECORD:
