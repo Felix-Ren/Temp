@@ -1,10 +1,6 @@
 ## Author: Michael Sheely
 ## June 24, 2015
-## To be run on MUFASA-PC with two cameras connected via FireWire
-## Modified by Henry Ehrhard
-
-# review note: not all functions defined used
-#              Detect signal light: cv2.findContours(..), identify(..)
+## Modified by Fei Ren
 
 import numpy as np
 from numpy import dot
@@ -16,17 +12,19 @@ import time; import cv2; import math; import csv; import sys; import os
 # python -m cProfile camera.py
 
 
-#writer.writerow(['frame_number','center_x','center_y'])
+# writer.writerow(['frame_number','center_x','center_y'])
 
-#All vectors are assumed to be two dimensional
+# All vectors are assumed to be two dimensional
+    
+HCELLS = 3 # number of horizontal cells on a tag
+VCELLS = 3 # number of vertical cells on a tag
 
-HCELLS = 3 #number of horizontal cells on a tag
-VCELLS = 3 #number of vertical cells on a tag
-
-HEIGHT = 480
-WIDTH = 640
-HORIZ_OFFSET = 7 # 9
-VERT_OFFSET = 77 # 73
+HEIGHT = 500  # doesn't affect camera coverage. affect resolution and window size
+WIDTH = 500
+testbedLength = 327.66 # in cm (the one used at gym)
+testbedWidth = 327.66 # in cm
+HORIZ_OFFSET = 14.8 # in cm.
+# VERT_OFFSET = 77 # 73
 RED,GREEN,BLUE,YELLOW,DARKRED = ([0,0,255],[0,255,0],[255,0,0],[0,255,255],[0,0,170])
 PRINTING = True
 DISPLAY_TAGS = True
@@ -38,23 +36,10 @@ TANK = False # the tank robot can only move in one-dimention without turn
 # initialize file storage path
 if TANK:
     path = "TankRuns\\"
-    TIME_LIMIT = 480
+    # TIME_LIMIT = 1000000 # 480
 else:
-    path = "KiwiRuns\\RowsTestbed\\"  # kiwi is the kind of robot which can move to all directions
-    TIME_LIMIT = 180
-
-
-def update_HORIZ(x):
-    global HORIZ_OFFSET
-    HORIZ_OFFSET = x
-
-def update_VERT(x):
-    global VERT_OFFSET
-    VERT_OFFSET = x
-
-#cv2.cv.CreateTrackbar('H Offset', 'combFrame', HORIZ_OFFSET, 20, update_HORIZ)
-#cv2.cv.CreateTrackbar('V Offset', 'combFrame', VERT_OFFSET, 100, update_VERT)
-
+    path = "F:\Gym_experiment\\"  # "KiwiRuns2017\\"  # "KiwiRunsWinter2017\\"  # kiwi is the kind of robot which can move to all directions
+    # TIME_LIMIT = 180  # 10 #
 
 class RobotData:
     def __init__(self, center):
@@ -90,15 +75,13 @@ def threshold(src, value=120):
 #finds all contours and keeps only those with area between 50 and 1000 pixels
 def findAprilTags(threshed, img):
     contours, hierarchy = cv2.findContours(threshed, 1, cv2.CHAIN_APPROX_SIMPLE) # contours are stored as vectors of points
-    return filter(lambda c: isTag(c, img), contours)
+    return filter(lambda c: isTag(c, img), contours) #the second 'c' refers to elements in contours
 
 def isTag(c, img):
-    #determines if the image is a tag, based on its area and intensity
-    MIN_SIZE = 700
-    MAX_SIZE = 2000
-    #MIN_VAL = 300
-    #MAX_VAL = 700
-    
+    # determines if the image is a tag, based on its area and intensity
+    MIN_SIZE = 30
+    MAX_SIZE = 350
+
     boxVertices = cv2.cv.BoxPoints(cv2.minAreaRect(c))
     boxArea = math.sqrt((boxVertices[0][0]-boxVertices[1][0])**2 + (boxVertices[0][1]-boxVertices[1][1])**2) * \
         math.sqrt((boxVertices[0][0]-boxVertices[3][0])**2 + (boxVertices[0][1]-boxVertices[3][1])**2)
@@ -106,7 +89,11 @@ def isTag(c, img):
         boundingRatio = boxArea / cv2.contourArea(c)
     else:
         boundingRatio = 2
-
+        
+#    # test measurement
+#    if boundingRatio < 1.15:
+#        print cv2.contourArea(c)
+        
     return (MIN_SIZE < cv2.contourArea(c) < MAX_SIZE) and goodAspectRatio(c, img) and boundingRatio < 1.15
 
 def goodAspectRatio(c, img):
@@ -115,7 +102,8 @@ def goodAspectRatio(c, img):
     #M = cv2.moments(c)
     #center = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
     #cv2.putText(img, str(aspectRatio), center, cv2.FONT_HERSHEY_SIMPLEX, .45, BLUE,2)
-    return 1 < aspectRatio < 2
+    # print aspectRatio
+    return 1.4 < aspectRatio < 3.5  # 2.6
 
 def averageValue(img):
     height, width = img.shape[:2]
@@ -123,7 +111,10 @@ def averageValue(img):
     return val/(height*width)
 
 def drawTags(tagList, img):
-    cv2.drawContours(img, tagList, -1, DARKRED, 2) #draw all contours in red, with thickness 2
+    cv2.drawContours(img, tagList, -1, GREEN, 2) #draw all contours in red, with thickness 2
+
+def drawSignalLight(lightList, img):
+    cv2.drawContours(img, lightList, -1, BLUE, 1) #draw all contours in blue, with thickness 2
 
 def drawCircle(point, img, color):
     cv2.circle(img, integerize(point), 2, color, 2)
@@ -256,7 +247,7 @@ def calculateAngle(tag, rect, idMatrix):
     elif idMatrix[2,0] and idMatrix[2,1] and idMatrix[2,2]: #bottom is dark
         return theta
     else:
-        #print 'Could not identify tag orientation'
+        print 'Could not identify tag orientation'
         return theta
 
 #determines whether the point p is inside a rectangle with the given points
@@ -275,39 +266,109 @@ def matrixToIndex(matrix):
     elif np.all(matrix[:,2]):
         index = binaryDigitsToDecimalString(matrix[:,0][::-1]) + binaryDigitsToDecimalString(matrix[:,1][::-1])
     else:
-        print "Unable to identify tag"
+        #print "Unable to identify tag"
         index = binaryDigitsToDecimalString(matrix[:,1][::-1]) + binaryDigitsToDecimalString(matrix[:,2][::-1])
     return index
 
 def integerize(point):
     return (int(point[0]),int(point[1]))
 
-#### MAIN ####
+# # check if the contour is the signal light
+# def isSignalLight(c):
+    # # determines if the image is a tag, based on its area and aspect ratio
+    # MIN_SIZE = 80  #need to reset this
+    # MAX_SIZE = 200  #need to reset this
+    
+# #    boxVertices = cv2.cv.BoxPoints(cv2.minAreaRect(c))
+# #    boxArea = math.sqrt((boxVertices[0][0]-boxVertices[1][0])**2 + (boxVertices[0][1]-boxVertices[1][1])**2) * \
+# #        math.sqrt((boxVertices[0][0]-boxVertices[3][0])**2 + (boxVertices[0][1]-boxVertices[3][1])**2)
 
+    # _, (width, height), _ = cv2.minAreaRect(c)
+    # if width == 0 or height == 0:
+        # return False
+    # else:        
+        # aspectRatio = max([width/height, height/width])
+        # return (MIN_SIZE < cv2.contourArea(c) < MAX_SIZE) and (1 <= aspectRatio < 1.3)  # may need to reset aspectRatio bounds
+
+
+# check the state of the robot (either flying or hovering) using color, shape and size
+def checkState(frame, colorLowerBd, colorUpperBd):
+    hsv_color = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv_color, colorLowerBd, colorUpperBd)
+    
+    # for debug and demo purpose
+    cv2.imshow("blue mask", mask)  # white dots are signal of interest
+    
+#    testbed_top_left_x = 150# enter correct value here
+#    testbed_top_left_y = 135# enter correct value here
+#    testbed_bottom_right_x = frame.shape[1] - 65 # enter correct value here
+#    testbed_bottom_right_y = frame.shape[0] - 40 # enter correct value here
+#    frame = mask[testbed_top_left_y:testbed_bottom_right_y, testbed_top_left_x:testbed_bottom_right_x]
+
+    # print np.sum((mask>0))
+    # if np.sum((frame>0)) > 50: # mic drop
+    if np.sum((mask>0)) > 16:  #260: #211: # mic drop
+        # print 'blue light detected'
+        return 'F',mask
+    else:
+        # print 'no blue'
+        return 'H',mask
+
+# check if the robot transitions from one step to another (red light)
+# @param frame is the original frame after the perspective transformation
+# @param hLowBd is a 1 x 2 array. It stores two lower bounds of the hue ranges.
+# @param hUppBd is a 1 x 2 array. It stores two upper bounds of the hue ranges.
+# @param sUppBd is a 1 x 1 array. It stores the lower bound of the saturation range.
+# @param vLowBd is a 1 x 1 array. It stores the lower bound of the value range.
+# @returns true if this frame corresponds to the end of a step or the beginning of the first step
+# @returns false if this frame corresponds to the middle of a step
+def checkTransition(frame, hLowBd, hUppBd, sLowBd, sUppBd, vLowBd, vUppBd):
+    hsv_color = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # convert the frame from BGR to HSV color space
+	
+	# manually convert the frame to a binary frame according to the HSV ranges.
+	# A pixel gets value 1 if its color falls in all the ranges; it gets value 0 otherwise.
+    h_bool = ((hLowBd[0] <= hsv_color[:, :, 0]) & (hsv_color[:, :, 0] <= hUppBd[0])) | (
+              (hLowBd[1] <= hsv_color[:, :, 0]) & (hsv_color[:, :, 0] <= hUppBd[1]))
+    s_bool = (sLowBd[0] <= hsv_color[:, :, 1]) & (hsv_color[:, :, 1] <= sUppBd[0])
+    mask = np.zeros((hsv_color.shape[0], hsv_color.shape[1]))
+    mask[(h_bool & s_bool)] = 1
+
+    # debug purpose. test
+    cv2.imshow("red mask", mask)  # show the window, which is named "red mask," of the masked frame.
+
+    # print np.sum((mask>0))
+    if np.sum((mask > 0)) > 82:  # mic drop. Need to adjust/change. Set the value to be the average of the minimum value when the red light is on and the maximum value when the red light is off.
+        return True, mask
+    else:
+        return False, mask
+		
+# def checkTransition(frame, colorLowerBd, colorUpperBd):
+    # hsv_color = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # convert the frame from BGR to HSV color space
+	
+    # mask = cv2.inRange(hsv_color, colorLowerBd, colorUpperBd)
+
+    # # debug purpose. test
+    # cv2.imshow("red mask", mask)  # show the window, which is named "red mask," of the masked frame.
+
+    # # print np.sum((mask>0))
+    # if np.sum((mask > 0)) > 82:  # mic drop. Need to adjust/change. Set the value to be the average of the minimum value when the red light is on and the maximum value when the red light is off.
+        # return True, mask
+    # else:
+        # return False, mask
+
+#### MAIN ####
 def main():
 
     # turn on the camera
-    cam0 = cv2.VideoCapture(1) # VideoCapture is a class defined in opencv.
-    cam1 = cv2.VideoCapture(0) # 0 as input means open the default camera.
-    
-    #find transformations to line up frames
-    
-    #calibrate for a continuous shot of the floor
-    #calibrationPoints0 = np.float32([[35,1],[35,424],[627,2],[630,422]])
-    #calibrationPoints1 =  np.float32([[31,42],[27,472],[627,49],[625,470]])
-    
+    cam0 = cv2.VideoCapture(1)  # VideoCapture is a class defined in opencv.
+    # make sure to sure 1 instead of 0 as input for laptop
+    # cam0.set(cv.CAP_PROP_FRAME_HEIGHT, 1000)
+
     #calibrate for a continuous shot at the height of the tags
-    calibrationPoints0 = np.float32([[58,57],[61,438],[580,54],[582,432]])
-    calibrationPoints1 = np.float32([[54,40],[55,426],[578,43],[574,418]])
-    corners = np.float32([[0,0],[0,HEIGHT],[WIDTH,0],[WIDTH,HEIGHT]]) 
-    
-    #error test calibration
-    #calibrationPoints0 = np.float32([[105,19],[109,411],[622,15],[626,402]])
-    #calibrationPoints1 =  np.float32([[105,14],[109,407],[623,15],[626,400]])
-    
-   
+    calibrationPoints0 = np.float32([[72,3],[83,478],[585,480],[595,0]]) # order: from top-left corner, CCW
+    corners = np.float32([[0,0],[0,WIDTH],[HEIGHT,WIDTH],[HEIGHT,0]])  # dimension of the window
+      
     transform0 = cv2.getPerspectiveTransform(calibrationPoints0,corners) # transform coordinate from the original to a rectangle with 0,0 to the top-left corner.
-    transform1 = cv2.getPerspectiveTransform(calibrationPoints1,corners) # first param is the source coordinates, second is the destination coordinates
     
     # prepare to write in .csv and .avi files
     if RECORD:
@@ -319,89 +380,127 @@ def main():
                 i = i + 1
             f = open(path+"tracking"+str(i)+".csv", 'wb')
         writer = csv.writer(f)
-        out = cv2.VideoWriter(path+"trial" + str(i) + '.avi', -1, 27.0, (WIDTH, 2*HEIGHT)) # open video file for writing.
+        out = cv2.VideoWriter(path+"trial" + str(i) + '.avi', -1, 27.0, (WIDTH, HEIGHT)) # open video file for writing.
+       # out = cv2.VideoWriter(path+"trial" + str(i) + '.avi', -1, 27.0, (WIDTH, 2*HEIGHT)) # open video file for writing.
         # param1: file name; param2: codec of the file, such as mpeg ; param3: fps; param4: size
 
-    cv2.namedWindow('combFrame', cv2.WINDOW_NORMAL)
+    # cv2.namedWindow('processedFrame', cv2.WINDOW_NORMAL)
     lastX = None
+    recordedX = None
     lastY = None
+    state = None
+    stepEnd = False  # true if the row of data correponds to the end/beginning of a step
     startTime = time.time()
 
-    while(cam0.isOpened() & cam1.isOpened()):
-        
-        
+    while(cam0.isOpened()):
         # Capture frame-by-frame
-        ret0, frame0 = cam0.read() # read the first frame. first return value is a bool, says if successfully capture a frame or not. second return is the frame.
-        ret1, frame1 = cam1.read()
-        
-        if ret0 & ret1:
-            
-            if sum(abs(cv2.subtract(np.int32(frame0)[HEIGHT-1,:,0], np.int32(frame1)[0,:,0]))) > 50000: # image stored as a matrix?? Check for shift of focus during the recording
-                cam0.release()
-                cam1.release()
-                cam0 = cv2.VideoCapture(1)
-                cam1 = cv2.VideoCapture(0)
-                ret0, frame0 = cam0.read()
-                ret1, frame1 = cam1.read()
-                print "cameras reset"
-            
+        ret0, frame0 = cam0.read() # read the first frame. first return value is a bool, says if successfully capture a frame or not. second return is the frame.    
+
+        if ret0:             
             # covert color to gray
             thresh0 = threshold(cv2.cvtColor(frame0, cv2.COLOR_BGR2GRAY,260)) # 260 - number of channels
-            thresh1 = threshold(cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY,260))
- 
+            
+#            #check state of the robot in two separate frames
+#            state0 = checkState(thresh0, frame0)
+
+
+            # # test. debug
+            # cv2.imshow("original", frame0)
+
+
+
             tagList = findAprilTags(thresh0, frame0)
             drawTags(tagList,frame0)
-            
+
             # record the position of the robot
             for tag in tagList:
                 M = cv2.moments(tag)
                 center = cv2.perspectiveTransform(np.float32([[(M['m10']/M['m00']), (M['m01']/M['m00'])]])[None,:,:],transform0) # transform the tag shape to the one conform to the rectangular window??
-                lastX = center[0][0][0] # x coordinate of the robot
-                lastY = center[0][0][1]
+                lastY = center[0][0][0] # y coordinate of the robot
+                lastX = center[0][0][1] # x coordinate of the robot
                 
-            
-            tagList = findAprilTags(thresh1, frame1)
-            drawTags(tagList,frame1)
-            for tag in tagList:
-                M = cv2.moments(tag)
-                center = cv2.perspectiveTransform(np.float32([[(M['m10']/M['m00']), (M['m01']/M['m00'])]])[None,:,:],transform1)
-                lastX = center[0][0][0]
-                lastY = center[0][0][1] + HEIGHT
-            
             if CALIBRATION_MODE:
-                for point in calibrationPoints0.astype(int):
-                    cv2.circle(frame0, tuple(point.tolist()), 2, (255,0,0),-1)
-                for point in calibrationPoints1.astype(int):
-                    cv2.circle(frame1, tuple(point.tolist()), 2, (255,0,0),-1)        
+                cv2.circle(frame0, (72,3), 2, (255,0,0),-1)  # top-left corner
+                cv2.circle(frame0, (83,478), 2, (255,0,0),-1)
+                cv2.circle(frame0, (585,480), 2, (255,0,0),-1)
+                cv2.circle(frame0, (595,0), 2, (255,0,0),-1)
+
+                # for point in calibrationPoints0.astype(int):
+                #     cv2.circle(frame0, tuple(point.tolist()), 2, (255,0,0),-1)
             else:
                 frame0 = cv2.warpPerspective(frame0, transform0, (WIDTH,HEIGHT)) # transform the frame
-                frame1 = cv2.warpPerspective(frame1, transform1, (WIDTH,HEIGHT))
-            
-            combFrame = np.concatenate((frame0,frame1),axis=0)
-                
-            #drawTags(tagList,combFrame)q
-            #drawRobots(combFrame)
-            cv2.imshow('combFrame', combFrame) # display the frame
-            
+            cv2.imshow('calibrated window', frame0)  # use this to fix position of the testbed on the ground
+
+            # check if the blue signal light is on.
+            stateLightColorLowBd = np.array([100, 75, 0])
+            stateLightColorUppBd = np.array([120, 255, 255])
+            state, mask1 = checkState(frame0, stateLightColorLowBd, stateLightColorUppBd)
+
+            # check if there is transition of steps from one step to another
+            # range: h [0,7] U [169,179]; s: [95,230]; v: [0,255]  can adjust s and v
+            transitionHueLowBd = np.array([0, 169])  
+            transitionHueUppBd = np.array([7, 179])
+            transitionSatLowBd = np.array([95])
+            transitionSatUppBd = np.array([230])
+            transitionValLowBd = np.array([0])
+            transitionValUppBd = np.array([255])
+            stepEnd, mask2 = checkTransition(frame0, transitionHueLowBd, transitionHueUppBd,
+                                             transitionSatLowBd, transitionSatUppBd,
+                                             transitionValLowBd, transitionValUppBd)
+            # the beginning of the first step is also considered as "step end"
+			
+			## if floor is still captured as red light, use this set of ranges and function			
+			# transLightColorLowBd = np.array([169, 95, 0])
+            # transLightColorUppBd = np.array([179, 230, 255])
+            # stepEnd, mask2 = checkTransition(frame0, transLightColorLowBd, transLightColorUppBd)
+
+
             # write frame(video) to file and write position of the tag to .csv
             if RECORD:
-                out.write(combFrame)
+                out.write(frame0)
+                now = time.time()
                 if lastX != None: # is it possible that this value == None during the recording?
-                    writer.writerow([lastX, lastY])
-        
+
+                    if recordedX != lastX:  # in case tag detection signal is off/discontinuous
+                        # shift the origin from the top left corner to bottom left corner.
+						# (x-axis is the side parallel to the closest wall)
+                        lastY = WIDTH - lastY       						
+                        
+                        # convert unit of lastX and lastY to centimeter.
+                        lastX = testbedWidth * lastX / HEIGHT
+                        lastY = testbedLength * lastY / WIDTH
+						
+						# adjust for the extra white margin in the x-axis
+                        lastX = lastX - HORIZ_OFFSET
+
+                    
+                    recordedX = lastX
+                    
+                    # test
+                    print "lastX: ", lastX
+                    print "lastY: ", lastY
+                    print "state: ", state
+                    print "time: ", now-startTime
+                    print "step transitions now: ", stepEnd
+
+
+                    writer.writerow([lastX, lastY, state, now - startTime, stepEnd])
+                    # state: either flying ('F') or hovering ('H') 
+                    # now - startTime recording the current timestamp of the robot (in second) with the beginning of the program t = 0s.
+                else:
+                    writer.writerow([None, None, state, now - startTime, stepEnd])
+
         # Automatically stop the process when the length of time exceeds the time limit
         now = time.time()
-        if now - startTime > TIME_LIMIT:
-            break
+        # if now - startTime > TIME_LIMIT:
+        #     break
         if cv2.waitKey(1) == ord('q'):
             break
         
     # When everything is done, release the capture
 
-   #cv2.imwrite("background.jpg", combFrame)
     # turn off the cameras
     cam0.release()
-    cam1.release()
     if RECORD:
         out.release()
         f.close()
